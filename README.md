@@ -33,7 +33,14 @@
 </p>
 
 ## Overview
-This codebase supports Mujoco simulation of motion tracking on Unitree G1 robot. We provide a pretrained checkpoint and several example motions. This codebase is lightweight and easy to use. We have tested it both on Linux and M1 MacOS.
+
+This is a fork of [GMT (General Motion Tracking)](https://github.com/zixuan417/humanoid-general-motion-tracking) with added support for **visualizing NPZ motion files** from Isaac Lab.
+
+**Key Features:**
+- 🎬 Visualize G1 robot motions in MuJoCo
+- 📁 Support both **PKL** (original) and **NPZ** (Isaac Lab) formats
+- 🔄 Automatic quaternion format conversion (wxyz ↔ xyzw)
+- 🤖 Joint order remapping from Isaac Lab (29 DOF) to MuJoCo (23 DOF)
 
 ## Installation && Running
 
@@ -51,7 +58,11 @@ To change motions, you can replace `walk_stand.pkl` with other motions in the [m
 
 You can also view the kinematics motion by running:
 ```bash
+# PKL format (original)
 python view_motion.py --motion assets/motions/dance.pkl
+
+# NPZ format (Isaac Lab)
+python view_motion.py --motion your_motion.npz
 ```
 
 ### Supported Motion File Formats
