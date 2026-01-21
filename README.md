@@ -62,7 +62,7 @@ You can also view the kinematics motion by running:
 python view_motion.py --motion assets/motions/dance.pkl
 
 # NPZ format (Isaac Lab)
-python view_motion.py --motion your_motion.npz
+python view_motion.py --motion assets/motions/000007.npz
 ```
 
 ### Supported Motion File Formats
