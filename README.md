@@ -51,9 +51,33 @@ To change motions, you can replace `walk_stand.pkl` with other motions in the [m
 
 You can also view the kinematics motion by running:
 ```bash
-python view_motion.py --motion walk_stand.pkl
+python view_motion.py --motion assets/motions/dance.pkl
 ```
 
+### Supported Motion File Formats
+
+| Format | Quaternion | Field Names |
+|--------|------------|-------------|
+| **PKL** | `xyzw` | `root_pos`, `root_rot`, `dof_pos` |
+| **NPZ** (Isaac Lab) | `wxyz` | `root_pos` or `body_pos_w`, `root_rot` or `body_quat_w`, `joint_pos` |
+
+**NPZ Format Details:**
+- `root_pos`: Shape `(T, 3)` — Root position in meters
+- `root_rot`: Shape `(T, 4)` — Root rotation quaternion in **wxyz** format
+- `joint_pos`: Shape `(T, 29)` — Joint angles in radians (Isaac Lab G1 joint order)
+- `fps`: Scalar — Frame rate
+
+**Isaac Lab G1 Joint Order (29 DOF):**
+```
+[0-1]   hip_pitch (L/R)      [2]     waist_yaw
+[3-4]   hip_roll (L/R)       [5]     waist_roll
+[6-7]   hip_yaw (L/R)        [8]     waist_pitch
+[9-10]  knee (L/R)
+[11-12] shoulder_pitch (L/R) [13-14] ankle_pitch (L/R)
+[15-16] shoulder_roll (L/R)  [17-18] ankle_roll (L/R)
+[19-20] shoulder_yaw (L/R)   [21-22] elbow (L/R)
+[23-28] wrist_roll/pitch/yaw (L/R)
+```
 ## ‼️Alert & Disclaimer
 Although the pretrained policy has been successfully tested on our machine, the performance of the policy might vary on different robots. We cannot guarantee the success of deployment on every machine. The model we provide is for research use only, and we disclaim all responsibility for any harm, loss, or malfunction arising from its deployment.
 

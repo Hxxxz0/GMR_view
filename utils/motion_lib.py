@@ -1,11 +1,25 @@
 import os, pickle
 import logging
+import numpy as np
+import sys
 
 import torch
 
 from .torch_utils import quat_diff, quat_to_exp_map, slerp
 from tqdm import tqdm
 logger = logging.getLogger(__name__)
+
+# Handle numpy backward compatibility for pickle files
+class NumpyCompatUnpickler(pickle.Unpickler):
+    """Custom unpickler to handle numpy version compatibility issues."""
+    def find_class(self, module, name):
+        # Remap numpy._core to numpy.core for older pickle files
+        if module.startswith('numpy._core'):
+            module = module.replace('numpy._core', 'numpy.core')
+        # Also handle numpy._core.multiarray
+        if module == 'numpy.core._multiarray_umath':
+            module = 'numpy.core.multiarray'
+        return super().find_class(module, name)
 
 def smooth(x, box_pts, device):
     box = torch.ones(box_pts, device=device) / box_pts
@@ -48,49 +62,77 @@ class MotionLib:
             curr_file = motion_files[i]
             self._motion_names.append(os.path.basename(curr_file))
             try:
-                with open(curr_file, "rb") as f:
-                    motion_data = pickle.load(f)
+                if curr_file.endswith(".npz"):
+                    motion_data = np.load(curr_file, allow_pickle=True)
+                else:
+                    with open(curr_file, "rb") as f:
+                        motion_data = NumpyCompatUnpickler(f).load()
+
+                fps = float(motion_data["fps"])
+                curr_weight = motion_weights[i]
+                dt = 1.0 / fps
+
+                if "dof_pos" not in motion_data and "joint_pos" in motion_data:
+                    motion_data_dof_pos = motion_data["joint_pos"]
+                else:
+                    motion_data_dof_pos = motion_data["dof_pos"]
+                
+                # Handle different field names for root position
+                if "root_pos" in motion_data:
+                    root_pos_np = np.asarray(motion_data["root_pos"], dtype=np.float32)
+                elif "body_pos_w" in motion_data:
+                    # Extract pelvis/root (index 0) from body positions
+                    root_pos_np = np.asarray(motion_data["body_pos_w"][:, 0, :], dtype=np.float32)
+                else:
+                    raise KeyError("Missing 'root_pos' or 'body_pos_w' in motion file")
+                
+                # Handle different field names for root rotation
+                if "root_rot" in motion_data:
+                    root_rot_np = np.asarray(motion_data["root_rot"], dtype=np.float32)
+                elif "body_quat_w" in motion_data:
+                    # Extract pelvis/root (index 0) from body quaternions
+                    root_rot_np = np.asarray(motion_data["body_quat_w"][:, 0, :], dtype=np.float32)
+                else:
+                    raise KeyError("Missing 'root_rot' or 'body_quat_w' in motion file")
+                
+                dof_pos_np = np.asarray(motion_data_dof_pos, dtype=np.float32)
                     
-                    fps = motion_data["fps"]
-                    curr_weight = motion_weights[i]
-                    dt = 1.0 / fps
-                    
-                    root_pos = torch.tensor(motion_data["root_pos"], dtype=torch.float, device=self._device)
-                    root_rot = torch.tensor(motion_data["root_rot"], dtype=torch.float, device=self._device)
-                    dof_pos = torch.tensor(motion_data["dof_pos"], dtype=torch.float, device=self._device)
-                    
-                    num_frames = root_pos.shape[0]
-                    curr_len = dt * (num_frames - 1)
-                    
-                    root_vel = torch.zeros_like(root_pos) # (num_frames, 3)
-                    root_vel[:-1, :] = fps * (root_pos[1:, :] - root_pos[:-1, :])
-                    root_vel[-1, :] = root_vel[-2, :]
-                    root_vel = smooth(root_vel, 19, device=self._device)
-                    
-                    root_ang_vel = torch.zeros_like(root_pos) # (num_frames, 3)
-                    root_drot = quat_diff(root_rot[:-1], root_rot[1:])
-                    root_ang_vel[:-1, :] = fps * quat_to_exp_map(root_drot)
-                    root_ang_vel[-1, :] = root_ang_vel[-2, :]
-                    root_ang_vel = smooth(root_ang_vel, 19, device=self._device)
-                    
-                    dof_vel = torch.zeros_like(dof_pos) # (num_frames, num_dof)
-                    dof_vel[:-1, :] = fps * (dof_pos[1:, :] - dof_pos[:-1, :])
-                    dof_vel[-1, :] = dof_vel[-2, :]
-                    dof_vel = smooth(dof_vel, 19, device=self._device)
-                    
-                    self._motion_weights.append(curr_weight)
-                    self._motion_fps.append(fps)
-                    self._motion_dt.append(dt)
-                    self._motion_num_frames.append(num_frames)
-                    self._motion_lengths.append(curr_len)
-                    self._motion_files.append(curr_file)
-                    
-                    self._motion_root_pos.append(root_pos)
-                    self._motion_root_rot.append(root_rot)
-                    self._motion_root_vel.append(root_vel)
-                    self._motion_root_ang_vel.append(root_ang_vel)
-                    self._motion_dof_pos.append(dof_pos)
-                    self._motion_dof_vel.append(dof_vel)
+                root_pos = torch.from_numpy(root_pos_np).float().to(self._device)
+                root_rot = torch.from_numpy(root_rot_np).float().to(self._device)
+                dof_pos = torch.from_numpy(dof_pos_np).float().to(self._device)
+                
+                num_frames = root_pos.shape[0]
+                curr_len = dt * (num_frames - 1)
+                
+                root_vel = torch.zeros_like(root_pos) # (num_frames, 3)
+                root_vel[:-1, :] = fps * (root_pos[1:, :] - root_pos[:-1, :])
+                root_vel[-1, :] = root_vel[-2, :]
+                root_vel = smooth(root_vel, 19, device=self._device)
+                
+                root_ang_vel = torch.zeros_like(root_pos) # (num_frames, 3)
+                root_drot = quat_diff(root_rot[:-1], root_rot[1:])
+                root_ang_vel[:-1, :] = fps * quat_to_exp_map(root_drot)
+                root_ang_vel[-1, :] = root_ang_vel[-2, :]
+                root_ang_vel = smooth(root_ang_vel, 19, device=self._device)
+                
+                dof_vel = torch.zeros_like(dof_pos) # (num_frames, num_dof)
+                dof_vel[:-1, :] = fps * (dof_pos[1:, :] - dof_pos[:-1, :])
+                dof_vel[-1, :] = dof_vel[-2, :]
+                dof_vel = smooth(dof_vel, 19, device=self._device)
+                
+                self._motion_weights.append(curr_weight)
+                self._motion_fps.append(fps)
+                self._motion_dt.append(dt)
+                self._motion_num_frames.append(num_frames)
+                self._motion_lengths.append(curr_len)
+                self._motion_files.append(curr_file)
+                
+                self._motion_root_pos.append(root_pos)
+                self._motion_root_rot.append(root_rot)
+                self._motion_root_vel.append(root_vel)
+                self._motion_root_ang_vel.append(root_ang_vel)
+                self._motion_dof_pos.append(dof_pos)
+                self._motion_dof_vel.append(dof_vel)
             except Exception as e:
                 logger.error(f"Error loading motion file {curr_file}: {e}")
                 continue
