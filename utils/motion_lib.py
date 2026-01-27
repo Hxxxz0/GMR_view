@@ -164,6 +164,9 @@ class MotionLib:
 
     def get_motion_length(self, motion_ids):
         return self._motion_lengths[motion_ids]
+
+    def get_motion_fps(self, motion_ids):
+        return self._motion_fps[motion_ids]
         
     def num_motions(self):
         return self._motion_weights.shape[0]

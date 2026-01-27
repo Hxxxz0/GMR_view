@@ -9,9 +9,10 @@ from utils.motion_lib import MotionLib
 
 
 class MotionViewEnv:
-    def __init__(self, motion_file, robot_type="g1", device="cuda"):
+    def __init__(self, motion_file, robot_type="g1", device="cuda", record_video=False):
         self.robot_type = robot_type
         self.device = device
+        self.record_video = record_video
         
         self.motion_file = motion_file  # Store full path for format detection
         self.motion_file_name = os.path.basename(motion_file)
@@ -28,9 +29,14 @@ class MotionViewEnv:
         else:
             raise NotImplementedError("Robot type not supported")
         
-        self.sim_duration = 10*self.motion_len.item()
+        if self.record_video:
+            self.sim_duration = self.motion_len.item()
+        else:
+            self.sim_duration = 10*self.motion_len.item()
         
-        self.sim_dt = 0.02
+        self.fps = self.motion_lib.get_motion_fps(self.motion_ids).item()
+        print(f"Motion FPS: {self.fps}")
+        self.sim_dt = 1.0 / self.fps
         self.sim_decimation = 1
         self.control_dt = self.sim_dt * self.sim_decimation
         
@@ -39,10 +45,19 @@ class MotionViewEnv:
         self.data = mujoco.MjData(self.model)
         mujoco.mj_step(self.model, self.data)
         
-        self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data)
+        if self.record_video:
+            self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data, 'offscreen')
+        else:
+            self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data)
         self.viewer.cam.distance = 5.0
         
     def run(self):
+        if self.record_video:
+            import imageio
+            # video_name: motion_file_name without extension + .mp4
+            video_name = f"{os.path.splitext(self.motion_file_name)[0]}.mp4"
+            mp4_writer = imageio.get_writer(video_name, fps=self.fps)
+            print(f"Recording video to {video_name} with FPS {self.fps}")
         
         for i in tqdm(range(int(self.sim_duration / self.control_dt)), desc="Running simulation..."):
             curr_time = i * self.control_dt
@@ -128,15 +143,24 @@ class MotionViewEnv:
             
             mujoco.mj_forward(self.model, self.data)
             
-            self.viewer.render()
+            self.viewer.cam.lookat = self.data.qpos.astype(np.float32)[:3]
+            
+            if self.record_video:
+                img = self.viewer.read_pixels()
+                mp4_writer.append_data(img)
+            else:
+                self.viewer.render()
         
         self.viewer.close()
+        if self.record_video:
+            mp4_writer.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     
     parser.add_argument('--motion_file', type=str, default="walk_stand.pkl")
+    parser.add_argument('--record_video', action='store_true', help="Record video to .mp4")
     args = parser.parse_args()
     
     motion_path = args.motion_file
@@ -145,6 +169,6 @@ if __name__ == "__main__":
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    motion_env = MotionViewEnv(motion_file=motion_path, robot_type="g1", device=device)
+    motion_env = MotionViewEnv(motion_file=motion_path, robot_type="g1", device=device, record_video=args.record_video)
     motion_env.run()
     
